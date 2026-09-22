@@ -17,7 +17,6 @@ const CAM_ROT = 90;
 const CAM_SCALE = 1;
 
 const $ = (id) => document.getElementById(id);
-const statusEl = $("status");
 const cmdLog = $("cmdLog");
 const resultLog = $("resultLog");
 const paramLog = $("paramLog");
@@ -39,10 +38,19 @@ let stopFlag = false;
 let resetSent = false;
 let statusSource = "Add a port, then open it.";
 let bootSource = "Loading…";
+let preparedImage = null;
+
+const CONFIRM = {
+  deleteFace: "confirmDeleteFace",
+  clearFace: "confirmClearFace",
+  deletePv: "confirmDeletePalm",
+  clearPv: "confirmClearPalms",
+};
 
 function setStatus(text) {
   statusSource = text;
-  statusEl.textContent = tr(text);
+  const outcome = $("outcome");
+  if (outcome) outcome.textContent = tr(text);
 }
 
 function setBoot(text) {
@@ -56,7 +64,8 @@ function applyLanguage() {
     el.textContent = t(el.dataset.i18n);
   });
   $("boot").textContent = tr(bootSource);
-  statusEl.textContent = tr(statusSource);
+  const outcome = $("outcome");
+  if (outcome) outcome.textContent = tr(statusSource);
   const file = $("imageFile").files[0];
   if (!file) $("imageName").textContent = t("noImage");
   const empty = $("portList").querySelector("option[value='']");
@@ -75,7 +84,9 @@ function selected() {
 function syncImageRow() {
   const row = $("imageRow");
   const file = $("imageFile").files[0];
-  row.hidden = selected() !== "download";
+  const enroll = selected() === "download";
+  row.hidden = !enroll;
+  $("preview").hidden = !enroll;
   $("imageName").textContent = file ? file.name : t("noImage");
 }
 
@@ -286,6 +297,7 @@ function serialOptions(baud) {
 }
 
 function setConnected(open) {
+  document.body.classList.toggle("linked", open);
   $("open").disabled = open;
   $("close").disabled = !open || running;
   $("send").disabled = !open || running;
@@ -337,11 +349,9 @@ function preview() {
     case "clearFace": wasm.cmd_clear_face(); break;
     case "getAll": wasm.cmd_get_all_id(); break;
     case "version": wasm.cmd_get_version(); break;
-    case "download": {
-      const file = $("imageFile").files[0];
-      wasm.cmd_download_image(file ? file.size : 0, 0);
+    case "download":
+      wasm.cmd_download_image(preparedImage ? preparedImage.length : 0, 0);
       break;
-    }
     case "cam": wasm.cmd_cam_test(CAM_W, CAM_H, CAM_ROT, CAM_SCALE); break;
     case "enrollPv": wasm.cmd_enroll_pv(0, 0); break;
     case "deletePv": wasm.cmd_delete_user(PALM_ID); break;
@@ -385,6 +395,49 @@ function drawGray(pixels, width, height) {
   ctx.putImageData(image, 0, 0);
 }
 
+function paintView(source) {
+  canvas.width = 240;
+  canvas.height = 320;
+  ctx.fillStyle = "#000";
+  ctx.fillRect(0, 0, 240, 320);
+  ctx.drawImage(source, 0, 0);
+}
+
+async function frameFaceImage(file) {
+  const bitmap = await createImageBitmap(file);
+  const fitted = document.createElement("canvas");
+  fitted.width = 240;
+  fitted.height = 320;
+  const draw = fitted.getContext("2d");
+  draw.fillStyle = "#000";
+  draw.fillRect(0, 0, 240, 320);
+  const scale = Math.min(192 / bitmap.width, 256 / bitmap.height);
+  const width = Math.max(1, Math.round(bitmap.width * scale));
+  const height = Math.max(1, Math.round(bitmap.height * scale));
+  const x = 24 + (192 - width) / 2;
+  const y = 32 + (256 - height) / 2;
+  draw.drawImage(bitmap, x, y, width, height);
+  bitmap.close();
+  const blob = await new Promise((resolve) => fitted.toBlob(resolve, "image/jpeg", 0.92));
+  if (!blob) throw new Error("encode");
+  return new Uint8Array(await blob.arrayBuffer());
+}
+
+async function onPickImage() {
+  const file = $("imageFile").files[0];
+  syncImageRow();
+  preparedImage = null;
+  if (!file) return;
+  try {
+    preparedImage = await frameFaceImage(file);
+    const framed = await createImageBitmap(new Blob([preparedImage], { type: "image/jpeg" }));
+    paintView(framed);
+    framed.close();
+  } catch {
+    setStatus("Could not read that image.");
+  }
+}
+
 async function drawJpeg(bytes) {
   const bitmap = await createImageBitmap(new Blob([bytes], { type: "image/jpeg" }));
   canvas.width = bitmap.width;
@@ -395,6 +448,7 @@ async function drawJpeg(bytes) {
 
 async function runMid(cmd) {
   const frame = preview();
+  resultLog.value = "";
   rx = [];
   setStatus("Please wait while execute command...");
   await writeBytes(frame);
@@ -426,38 +480,37 @@ async function runMid(cmd) {
 }
 
 async function runDownload() {
-  const files = [...$("imageFile").files];
-  if (!files.length) {
-    setStatus("Choose a JPEG file first.");
+  if (!preparedImage) {
+    setStatus("Choose an image first.");
     return;
   }
-  for (const file of files) {
+  const data = preparedImage;
+  if (stopFlag) return;
+  wasm.cmd_download_image(data.length, 0);
+  const frame = takeFrame();
+  cmdLog.value = toHex(frame);
+  resultLog.value = "";
+  rx = [];
+  setStatus("Please wait while execute command...");
+  await writeBytes(frame);
+  try {
+    await readMid(5000);
+  } catch (error) {
+    failRx(error);
+    return;
+  }
+  logRx();
+  const accept = wasm.rx_byte(1);
+  if (accept !== 0) {
+    if (accept === 6) setStatus("Failed DownloadImage! Turn off camera view!");
+    else setStatus("Failed! DownloadImage");
+    bump(`DownloadImage Error=${accept.toString(16).toUpperCase()}`);
+    return;
+  }
+  for (let offset = 0; offset < data.length; offset += 512) {
     if (stopFlag) return;
-    wasm.cmd_download_image(file.size, 0);
-    const frame = takeFrame();
-    cmdLog.value = toHex(frame);
-    const data = new Uint8Array(await file.arrayBuffer());
-    rx = [];
-    setStatus("Please wait while execute command...");
-    await writeBytes(frame);
-    try {
-      await readMid(5000);
-    } catch (error) {
-      failRx(error);
-      return;
-    }
-    logRx();
-    const accept = wasm.rx_byte(1);
-    if (accept !== 0) {
-      if (accept === 6) setStatus("Failed DownloadImage! Turn off camera view!");
-      else setStatus("Failed! DownloadImage");
-      bump(`DownloadImage Error=${accept.toString(16).toUpperCase()}`);
-      return;
-    }
-    for (let offset = 0; offset < data.length; offset += 512) {
-      if (stopFlag) return;
-      await writeBytes(data.subarray(offset, Math.min(offset + 512, data.length)));
-    }
+    await writeBytes(data.subarray(offset, Math.min(offset + 512, data.length)));
+  }
     try {
       await readMid(5000);
     } catch (error) {
@@ -491,7 +544,6 @@ async function runDownload() {
         setStatus("Failed! Enroll face");
       }
     }
-  }
 }
 
 async function collectBlocks(timeoutMs, missesLimit) {
@@ -620,13 +672,14 @@ async function runCam() {
 }
 
 async function onSend() {
-  if (!port || !writer) {
-    setStatus("Open the serial port first.");
-    return;
-  }
   const cmd = selected();
   if (!cmd) {
     setStatus("Select a command.");
+    return;
+  }
+  if (CONFIRM[cmd] && !window.confirm(t(CONFIRM[cmd]))) return;
+  if (!port || !writer) {
+    setStatus("Open the serial port first.");
     return;
   }
   if (running) return;
@@ -711,7 +764,15 @@ function bindUi() {
     if (!running) preview();
   }));
   $("pickImage").addEventListener("click", () => $("imageFile").click());
-  $("imageFile").addEventListener("change", () => { if (!running) preview(); });
+  $("imageFile").addEventListener("change", () => { onPickImage(); });
+  let savedDev = false;
+  try { savedDev = localStorage.getItem("aureon-dev") === "1"; } catch { /* ignore */ }
+  $("devMode").checked = savedDev;
+  document.body.classList.toggle("dev", savedDev);
+  $("devMode").addEventListener("change", () => {
+    document.body.classList.toggle("dev", $("devMode").checked);
+    try { localStorage.setItem("aureon-dev", $("devMode").checked ? "1" : "0"); } catch { /* ignore */ }
+  });
   $("addPort").addEventListener("click", async () => {
     if (!("serial" in navigator)) {
       setStatus("Web Serial is unavailable. Open this page in Chrome or Edge.");

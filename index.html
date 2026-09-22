@@ -8,7 +8,7 @@
 </head>
 <body>
   <div class="shell">
-    <header class="top">
+    <header class="top card">
       <div class="brand">
         <img class="logo" src="img/aureon-logo.png?v=2" alt="Aureon">
         <div>
@@ -17,26 +17,30 @@
         </div>
       </div>
       <p id="boot">Loading…</p>
+      <div class="connect">
+        <label class="port">
+          <span data-i18n="port">Port</span>
+          <select id="portList"></select>
+        </label>
+        <button id="addPort" type="button" data-i18n="addPort">Add port</button>
+        <label class="dev-toggle">
+          <input id="devMode" type="checkbox">
+          <span data-i18n="devMode">Dev Mode</span>
+        </label>
+        <button id="open" type="button"><i class="led"></i><span data-i18n="open">Open</span></button>
+        <button id="close" type="button" disabled><i class="led"></i><span data-i18n="close">Close</span></button>
+        <select id="lang" aria-label="Language">
+          <option value="en">EN</option>
+          <option value="cn">中文</option>
+          <option value="kr">한국어</option>
+          <option value="jp">日本語</option>
+        </select>
+        <button id="send" type="button" data-i18n="send" disabled>Send</button>
+        <button id="stop" type="button" data-i18n="stop" disabled>Stop</button>
+      </div>
     </header>
 
-    <section class="card connect">
-      <label class="port">
-        <span data-i18n="port">Port</span>
-        <select id="portList"></select>
-      </label>
-      <button id="addPort" type="button" data-i18n="addPort">Add port</button>
-      <button id="open" type="button" data-i18n="open">Open</button>
-      <button id="close" type="button" data-i18n="close" disabled>Close</button>
-      <select id="lang" aria-label="Language">
-        <option value="en">EN</option>
-        <option value="cn">中文</option>
-        <option value="kr">한국어</option>
-        <option value="jp">日本語</option>
-      </select>
-      <p id="status">Add a port, then open it.</p>
-    </section>
-
-    <section class="card features">
+    <aside class="card features">
       <div class="feat-grid">
         <label class="feat"><input type="radio" name="cmd" value="enrollFace"><img src="img/feat-enroll-face.png?v=2" alt=""><span data-i18n="enrollFace">Enroll face</span></label>
         <label class="feat"><input type="radio" name="cmd" value="identifyFace"><img src="img/feat-identify-face.png?v=2" alt=""><span data-i18n="identifyFace">Identify face</span></label>
@@ -49,20 +53,17 @@
         <label class="feat"><input type="radio" name="cmd" value="getAll"><img src="img/feat-ids.png?v=2" alt=""><span data-i18n="getAll">Enrolled IDs</span></label>
         <label class="feat"><input type="radio" name="cmd" value="version"><img src="img/feat-version.png?v=2" alt=""><span data-i18n="version">Version</span></label>
       </div>
-    </section>
+    </aside>
+
+    <div class="main">
+    <div id="imageRow" class="card pick" hidden>
+      <button id="pickImage" type="button" data-i18n="chooseImage">Choose image</button>
+      <span id="imageName">No image selected</span>
+      <input id="imageFile" type="file" accept="image/*" hidden>
+    </div>
 
     <section class="desk">
       <div class="col">
-        <div class="card actions">
-          <button id="send" type="button" data-i18n="send" disabled>Send</button>
-          <button id="stop" type="button" data-i18n="stop" disabled>Stop</button>
-          <div id="imageRow" class="pick" hidden>
-            <button id="pickImage" type="button" data-i18n="chooseImage">Choose image</button>
-            <span id="imageName">No image selected</span>
-            <input id="imageFile" type="file" accept=".jpg,.jpeg,image/jpeg" hidden>
-          </div>
-        </div>
-
         <article class="card log trace">
           <div class="log-head"><span data-i18n="trace">Trace</span></div>
           <textarea id="cmdLog" readonly aria-label="Command bytes"></textarea>
@@ -71,7 +72,8 @@
 
         <div class="card stage">
           <div class="log-head"><span data-i18n="display">Display</span></div>
-          <div class="frame"><canvas id="view" width="240" height="320"></canvas></div>
+          <p id="outcome"></p>
+          <div class="frame" id="preview" hidden><canvas id="view" width="240" height="320"></canvas></div>
         </div>
       </div>
 
@@ -83,6 +85,7 @@
         <textarea id="paramLog" readonly></textarea>
       </article>
     </section>
+    </div>
   </div>
   <script type="module" src="app.js"></script>
 </body>
